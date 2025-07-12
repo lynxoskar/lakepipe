@@ -1,0 +1,96 @@
+# 📊 Batch Configuration for Historical Market Data Processing
+# This configuration handles large-scale minute bar data processing
+
+source:
+  uri: "s3://market-data-raw/minute-bars/**/*.parquet"
+  format: "parquet"
+  compression: "zstd"
+  read_options:
+    columns: ["symbol", "timestamp", "open", "high", "low", "close", "volume"]
+    filters: [["timestamp", ">=", "2024-01-01"]]
+    
+sink:
+  uri: "s3://market-data-processed/minute-bars/"
+  format: "parquet"
+  compression: "zstd"
+  partition_cols: ["symbol", "date"]
+  write_options:
+    row_group_size: 100000
+    use_dictionary: true
+    
+transform:
+  engine: "polars"
+  operations:
+    - type: "filter"
+      condition: "open > 0 AND high > 0 AND low > 0 AND close > 0 AND volume > 0"
+    
+    - type: "with_columns"
+      expressions:
+        - "extract('date', timestamp) as date"
+        - "extract('hour', timestamp) as hour"
+        - "extract('minute', timestamp) as minute"
+        - "(high - low) / low as range_pct"
+        - "(close - open) / open as return_pct"
+        - "close * volume as notional"
+        - "log(close / open) as log_return"
+    
+    - type: "window_function"
+      window_spec:
+        partition_by: ["symbol"]
+        order_by: ["timestamp"]
+        frame: "rows between 19 preceding and current row"
+      expressions:
+        - "avg(close) over w as sma_20"
+        - "stddev(close) over w as volatility_20"
+        - "avg(volume) over w as avg_volume_20"
+        - "sum(volume) over w as volume_sum_20"
+    
+    - type: "window_function"
+      window_spec:
+        partition_by: ["symbol"]
+        order_by: ["timestamp"]
+        frame: "rows between 49 preceding and current row"
+      expressions:
+        - "avg(close) over w as sma_50"
+        - "min(low) over w as low_50"
+        - "max(high) over w as high_50"
+    
+    - type: "with_columns"
+      expressions:
+        - "case when sma_20 > sma_50 then 1 else 0 end as trend_signal"
+        - "(close - sma_20) / volatility_20 as zscore"
+        - "case when volume > avg_volume_20 * 2 then 1 else 0 end as volume_spike"
+
+streaming:
+  enabled: false
+  batch_size: 1000000
+  
+cache:
+  enabled: true
+  cache_dir: "/opt/lakepipe/batch_cache"
+  max_size: "50GB"
+  ttl_days: 7
+  compression: "zstd"
+
+log:
+  level: "INFO"
+  format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+  file: "/var/log/lakepipe/batch.log"
+  
+resource_limits:
+  max_memory_gb: 32
+  max_cpu_cores: 16
+  disk_cache_gb: 100
+  
+optimization:
+  lazy_evaluation: true
+  predicate_pushdown: true
+  projection_pushdown: true
+  slice_pushdown: true
+  parallel_execution: true
+  
+monitoring:
+  enabled: true
+  progress_updates: true
+  performance_metrics: true
+  memory_usage: true

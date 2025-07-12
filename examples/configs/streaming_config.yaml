@@ -1,0 +1,69 @@
+# 📡 Streaming Configuration for Real-time Market Data Processing
+# This configuration handles high-throughput tick data from Kafka
+
+source:
+  uri: "kafka://market-data-ticks"
+  format: "kafka"
+  compression: "zstd"
+  kafka:
+    bootstrap_servers: ["localhost:9092"]
+    group_id: "lakepipe-streaming"
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    max_poll_records: 10000
+    serialization: "avro"
+    schema_registry_url: "http://localhost:8081"
+
+sink:
+  uri: "s3://market-data-processed/streaming/"
+  format: "parquet"
+  compression: "zstd"
+  partition_cols: ["symbol", "date"]
+  
+transform:
+  engine: "duckdb"
+  operations:
+    - type: "filter"
+      condition: "price > 0 AND quantity > 0"
+    
+    - type: "with_columns"
+      expressions:
+        - "extract('epoch', timestamp) * 1000 as timestamp_ms"
+        - "price * quantity as notional"
+        - "case when bid_price > 0 then (ask_price - bid_price) / bid_price else null end as spread_pct"
+    
+    - type: "window_function"
+      window_spec:
+        partition_by: ["symbol"]
+        order_by: ["timestamp"]
+        frame: "rows between 99 preceding and current row"
+      expressions:
+        - "avg(price) over w as price_sma_100"
+        - "avg(notional) over w as notional_sma_100"
+        - "sum(quantity) over w as volume_100"
+
+streaming:
+  enabled: true
+  batch_size: 50000
+  max_latency_ms: 100
+  window_size_ms: 1000
+  watermark_delay_ms: 5000
+  
+cache:
+  enabled: true
+  cache_dir: "/tmp/lakepipe_streaming_cache"
+  max_size: "1GB"
+  ttl_seconds: 300
+
+log:
+  level: "INFO"
+  format: "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+  file: "/var/log/lakepipe/streaming.log"
+  
+monitoring:
+  enabled: true
+  metrics_interval_seconds: 10
+  alert_thresholds:
+    max_latency_ms: 1000
+    min_throughput_per_sec: 1000
+    max_error_rate_pct: 1.0

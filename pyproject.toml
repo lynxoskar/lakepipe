@@ -42,6 +42,7 @@ dependencies = [
     "rich>=13.0.0",
     "python-decouple>=3.8",
     "orjson>=3.10.0",
+    "pyyaml>=6.0.0",
     "returns>=0.22.0",
     
     # Additional utilities

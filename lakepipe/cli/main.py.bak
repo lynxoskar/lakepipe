@@ -13,7 +13,6 @@ from rich.progress import Progress
 
 from lakepipe.config.defaults import build_pipeline_config
 from lakepipe.config.types import PipelineConfig
-from lakepipe.config.loaders import load_config_file, save_config_file
 from lakepipe.core.logging import configure_logging, get_logger
 from lakepipe.api.pipeline import create_pipeline, execute_pipeline
 
@@ -92,7 +91,7 @@ def run(
         None, 
         "--config", 
         "-c",
-        help="Configuration file (JSON or YAML)"
+        help="Configuration file (JSON)"
     ),
     env_file: str = typer.Option(
         ".env", 
@@ -117,16 +116,16 @@ def run(
     Examples:
         lakepipe run --source-uri s3://bucket/data/*.parquet --target-uri file:///output/
         lakepipe run --source-uri kafka://events --target-uri s3://processed/ --streaming
-        lakepipe run --config config.yaml --verbose
+        lakepipe run --config config.json --verbose
     """
     
-    # Build configuration using environment-aware builder + support for JSON/YAML
+    # Build configuration using environment-aware builder + orjson for config files
     file_config = {}
     if config_file:
         try:
-            file_config = load_config_file(config_file)
-            file_format = "YAML" if str(config_file).endswith(('.yaml', '.yml')) else "JSON"
-            console.print(f"✅ Loaded {file_format} configuration from {config_file}")
+            with open(config_file, 'rb') as f:
+                file_config = orjson.loads(f.read())
+            console.print(f"✅ Loaded configuration from {config_file}")
         except Exception as e:
             console.print(f"❌ Failed to load config file {config_file}: {e}")
             raise typer.Exit(1)
@@ -262,7 +261,7 @@ def version():
 
 @app.command()
 def config_example():
-    """Generate example configuration files in both JSON and YAML formats."""
+    """Generate example configuration files."""
     
     # Generate example .env file
     env_content = """# Lakepipe Environment Configuration
@@ -294,8 +293,8 @@ LAKEPIPE_KAFKA_GROUP_ID=lakepipe-processors
 LAKEPIPE_KAFKA_SERIALIZATION=json
 """
     
-    # Generate example configuration structure
-    example_config = {
+    # Generate example JSON config
+    json_config = {
         "source": {
             "uri": "s3://data-lake/raw/*.parquet",
             "format": "parquet",
@@ -333,14 +332,12 @@ LAKEPIPE_KAFKA_SERIALIZATION=json
     with open(".env.example", "w") as f:
         f.write(env_content)
     
-    # Save in both JSON and YAML formats
-    save_config_file(example_config, "lakepipe.config.json", "json")
-    save_config_file(example_config, "lakepipe.config.yaml", "yaml")
+    with open("lakepipe.config.json", "wb") as f:
+        f.write(orjson.dumps(json_config, option=orjson.OPT_INDENT_2))
     
     console.print("✅ Generated example configuration files:")
     console.print("  📄 .env.example")
     console.print("  📄 lakepipe.config.json")
-    console.print("  📄 lakepipe.config.yaml")
 
 # Helper functions
 

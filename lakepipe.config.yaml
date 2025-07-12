@@ -1,0 +1,21 @@
+source:
+  uri: s3://data-lake/raw/*.parquet
+  format: parquet
+  compression: zstd
+sink:
+  uri: s3://data-lake/processed/
+  format: parquet
+  compression: zstd
+transform:
+  engine: polars
+  operations:
+  - type: filter
+    condition: amount > 0
+  - type: with_columns
+    expressions:
+    - amount * 1.1 as amount_with_tax
+cache:
+  enabled: true
+  cache_dir: /opt/lakepipe/cache
+  max_size: 50GB
+  ttl_days: 30
