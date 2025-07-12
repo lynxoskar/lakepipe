@@ -39,27 +39,34 @@ pip install -r requirements.txt
 
 ### Basic Usage
 
-```python
-from lakepipe import create_pipeline, PipelineConfig
+```yaml
+# simple batch pipeline (config.yaml)
+source:
+  uri: "s3://data-lake/sales/*.parquet"
+  format: parquet
 
-# Create a simple batch pipeline
-config = {
-    "source": {"uri": "s3://data-lake/sales/*.parquet", "format": "parquet"},
-    "sink": {"uri": "s3://processed/sales/", "format": "parquet"},
-    "transform": {
-        "engine": "polars",
-        "operations": [
-            {"type": "filter", "condition": "amount > 0"},
-            {"type": "with_columns", "expressions": ["amount * 1.1 as amount_with_tax"]}
-        ]
-    },
-    "cache": {"enabled": True, "ttl_days": 7}
-}
+sink:
+  uri: "s3://processed/sales/"
+  format: parquet
 
-# Execute pipeline
-pipeline = create_pipeline(config)
-result = await pipeline.execute()
-print(f"✅ Processed {result.processed_count} records in {result.processing_time:.2f}s")
+transform:
+  engine: polars
+  operations:
+    - type: filter
+      condition: "amount > 0"
+    - type: with_columns
+      expressions:
+        - "amount * 1.1 as amount_with_tax"
+
+cache:
+  enabled: true
+  ttl_days: 7
+```
+
+Run it:
+
+```bash
+lakepipe run --config config.yaml
 ```
 
 ### CLI Examples
@@ -178,62 +185,61 @@ lakepipe/
 ### 1. **Batch ETL Pipeline**
 Transform large datasets with intelligent caching:
 
-```python
-# Process daily sales data with caching
-config = {
-    "source": {
-        "uri": "s3://data-lake/sales/date=2024-*/*.parquet",
-        "format": "parquet",
-        "cache": {
-            "enabled": True,
-            "immutable_only": True,  # Cache historical data
-            "ttl_days": 30
-        }
-    },
-    "transform": {
-        "engine": "polars", 
-        "operations": [
-            {"type": "filter", "condition": "status == 'completed'"},
-            {"type": "group_by", "columns": ["product_id"], "agg": "sum(amount)"},
-            {"type": "with_columns", "expressions": ["current_date() as processed_date"]}
-        ]
-    },
-    "sink": {"uri": "s3://analytics/sales-summary/", "format": "parquet"}
-}
+```yaml
+source:
+  uri: "s3://data-lake/sales/date=2024-*/*.parquet"
+  format: parquet
+  cache:
+    enabled: true
+    immutable_only: true  # Cache historical data
+    ttl_days: 30
+
+transform:
+  engine: polars
+  operations:
+    - type: filter
+      condition: "status == 'completed'"
+    - type: group_by
+      columns: [product_id]
+      agg: sum(amount)
+    - type: with_columns
+      expressions:
+        - "current_date() as processed_date"
+
+sink:
+  uri: "s3://analytics/sales-summary/"
+  format: parquet
 ```
 
 ### 2. **Real-Time Stream Processing**
 Process Kafka streams with low latency:
 
-```python
-# Real-time event processing
-config = {
-    "source": {
-        "uri": "kafka://user-events",
-        "format": "kafka",
-        "kafka": {
-            "bootstrap_servers": ["kafka1:9092", "kafka2:9092"],
-            "group_id": "analytics-processor",
-            "serialization": "json",
-            "auto_offset_reset": "latest"
-        }
-    },
-    "transform": {
-        "engine": "polars",
-        "operations": [
-            {"type": "filter", "condition": "event_type == 'purchase'"},
-            {"type": "with_columns", "expressions": [
-                "amount * exchange_rate as amount_usd",
-                "extract_country(ip_address) as country"
-            ]}
-        ]
-    },
-    "sink": {
-        "uri": "kafka://processed-purchases", 
-        "format": "kafka",
-        "kafka": {"partition_key": "user_id", "compression_type": "snappy"}
-    }
-}
+```yaml
+source:
+  uri: "kafka://user-events"
+  format: kafka
+  kafka:
+    bootstrap_servers: ["kafka1:9092", "kafka2:9092"]
+    group_id: analytics-processor
+    serialization: json
+    auto_offset_reset: latest
+
+transform:
+  engine: polars
+  operations:
+    - type: filter
+      condition: "event_type == 'purchase'"
+    - type: with_columns
+      expressions:
+        - "amount * exchange_rate as amount_usd"
+        - "extract_country(ip_address) as country"
+
+sink:
+  uri: "kafka://processed-purchases"
+  format: kafka
+  kafka:
+    partition_key: user_id
+    compression_type: snappy
 ```
 
 ### 3. **Data Lake to Data Warehouse**
