@@ -267,12 +267,39 @@ def create_sink_processor(config: PipelineConfig) -> BaseProcessor:
 def create_transform_processor(config: PipelineConfig) -> BaseProcessor:
     """Create a transform processor based on configuration"""
     transform_config = config["transform"]
+    engine = transform_config.get("engine", "polars")
     
-    # For now, just create a mock transform
-    # TODO: Implement actual transform processors
-    return MockTransformProcessor({
-        "operations": transform_config["operations"]
-    })
+    # Import engine-specific processors
+    from lakepipe.transforms import (
+        PolarsTransformProcessor,
+        DuckDBTransformProcessor,
+        ArrowTransformProcessor,
+        UserTransformProcessor
+    )
+    
+    # Create processor config with operations and user functions
+    processor_config = {
+        "operations": transform_config["operations"],
+        "user_functions": transform_config.get("user_functions", []),
+        "engine": engine
+    }
+    
+    # Dispatch to appropriate engine processor
+    if engine == "polars":
+        logger.info("Creating Polars transform processor")
+        return PolarsTransformProcessor(processor_config)
+    elif engine == "duckdb":
+        logger.info("Creating DuckDB transform processor")
+        return DuckDBTransformProcessor(processor_config)
+    elif engine == "arrow":
+        logger.info("Creating Arrow transform processor")
+        return ArrowTransformProcessor(processor_config)
+    elif engine == "user":
+        logger.info("Creating User transform processor")
+        return UserTransformProcessor(processor_config)
+    else:
+        logger.warning(f"Unknown engine '{engine}', falling back to Polars")
+        return PolarsTransformProcessor(processor_config)
 
 def create_pipeline(config: PipelineConfig) -> Pipeline:
     """
@@ -290,7 +317,13 @@ def create_pipeline(config: PipelineConfig) -> Pipeline:
     # Add source processor
     source_processor = create_source_processor(config)
     pipeline.add_processor(source_processor)
-    
+
+    # Insert window processor if window config is provided
+    window_cfg = config["transform"].get("window")
+    if window_cfg:
+        from lakepipe.core.window import WindowProcessor  # local import to avoid circular deps
+        pipeline.add_processor(WindowProcessor(window_cfg))
+
     # Add transform processor if configured
     if config["transform"]["operations"]:
         transform_processor = create_transform_processor(config)

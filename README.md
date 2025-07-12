@@ -280,46 +280,91 @@ LAKEPIPE_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 LAKEPIPE_LOG_LEVEL=INFO
 ```
 
-### JSON Configuration
-```json
-{
-  "source": {
-    "uri": "s3://data-lake/sales/*.parquet",
-    "format": "parquet",
-    "compression": "zstd"
-  },
-  "sink": {
-    "uri": "kafka://processed-sales",
-    "format": "kafka",
-    "kafka": {
-      "serialization": "json",
-      "compression_type": "snappy"
-    }
-  },
-  "transform": {
-    "engine": "polars",
-    "operations": [
-      {"type": "filter", "condition": "amount > 0"},
-      {"type": "with_columns", "expressions": ["amount * 1.1 as amount_with_tax"]}
-    ]
-  },
-  "cache": {
-    "enabled": true,
-    "max_size": "10GB",
-    "ttl_days": 7
-  }
-}
+### YAML Configuration
+```yaml
+source:
+  uri: "s3://data-lake/sales/*.parquet"
+  format: parquet
+  compression: zstd
+
+sink:
+  uri: "kafka://processed-sales"
+  format: kafka
+  kafka:
+    serialization: json
+    compression_type: snappy
+
+transform:
+  engine: polars
+  operations:
+    - type: filter
+      condition: "amount > 0"
+    - type: with_columns
+      expressions:
+        - "amount * 1.1 as amount_with_tax"
+
+cache:
+  enabled: true
+  max_size: 10GB
+  ttl_days: 7
 ```
 
 ### CLI Arguments
 ```bash
 lakepipe run \
-  --config config.json \
+  --config config.yaml \
   --source-uri "s3://override-bucket/data/*.parquet" \
   --cache \
   --kafka-servers "prod-kafka1:9092,prod-kafka2:9092" \
   --verbose
 ```
+
+### 🪟 Windowing Configuration (stream transforms)
+
+Lakepipe can perform windowing *before* the transformation engine via the built-in `WindowProcessor`.  Add a `window` block inside `transform` to enable it.
+
+```yaml
+transform:
+  engine: polars            # polars | duckdb | arrow | user
+  window:
+    type: tumbling          # tumbling | sliding
+    size: 1m                # window length (e.g. 10s, 1m, 2h)
+    slide: 15s              # ⟂ for sliding windows (defaults to `size`)
+    allowed_lateness: 5s    # watermark grace period for late data
+    time_column: timestamp  # event-time column; wall-clock used if missing
+  operations:
+    - type: with_columns
+      expressions:
+        - "price * quantity as notional"
+    - type: group_by
+      columns: [symbol]
+      agg: sum(notional) as total_notional
+```
+
+Semantics
+
+| Field              | Description                                         |
+|--------------------|-----------------------------------------------------|
+| `type`             | `tumbling` (non-overlapping) or `sliding` (can overlap) |
+| `size`             | Total length of each window                         |
+| `slide`            | Advance step for `sliding` windows (≤ `size`)       |
+| `allowed_lateness` | Extra time after a window’s end before it is **closed** and late rows are discarded / side-routed |
+| `time_column`      | Name of column containing event-time timestamps; if missing the processor falls back to processing-time (now) |
+
+The `WindowProcessor` emits a `DataPart` whose metadata contains a `window` object:
+
+```python
+{
+  "window": {
+     "start": datetime(...),
+     "end":   datetime(...),
+     "row_count": 12345
+  },
+  …
+}
+```
+
+Down-stream transform processors see each window as an independent mini-batch, so their logic stays unchanged.
 
 ## 🚀 Performance Features
 

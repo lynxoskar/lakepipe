@@ -40,6 +40,10 @@ class KafkaError(LakepipeError):
     """Kafka-related errors"""
     pass
 
+class WindowError(LakepipeError):
+    """Windowing-related errors (configuration, late data handling, etc.)"""
+    pass
+
 # Utility functions for working with Results
 
 def safe_execute(func: Callable[..., T], *args: Any, **kwargs: Any) -> Result[T, Exception]:
